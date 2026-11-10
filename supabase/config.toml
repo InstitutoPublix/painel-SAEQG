@@ -1,0 +1,18 @@
+# Supabase CLI (desenvolvimento local). Os itens não listados usam o padrão.
+# No Lovable Cloud, os mesmos ajustes de Auth ficam no painel do Cloud (ver README).
+project_id = "painel-saeqg"
+
+[auth]
+site_url = "http://localhost:8080"
+# Ninguém se cadastra sozinho: contas são criadas pela coordenação
+# (Configurações > Cadastros), pela Edge Function "usuarios".
+enable_signup = false
+minimum_password_length = 6
+
+[auth.email]
+enable_signup = false
+
+# A função confere o token por conta própria, porque a criação do primeiro
+# gestor (bootstrap) é chamada sem sessão.
+[functions.usuarios]
+verify_jwt = false
