@@ -394,10 +394,60 @@ function leEstado(id, pil){
   return DB.estado[chaveRec(id, pilDe(id, pil))] || {};
 }
 
-/* Remove uma evidencia (e os arquivos dela) da acao aberta na janela. */
-async function removeEvidencia(codigo, id){
-  await srv.removerEvidencia(id);
+/* Remove uma evidencia (e os arquivos dela). O servidor registra no
+   historico da acao quem removeu, o motivo e o que foi removido.       */
+async function removeEvidencia(id, motivo, autor){
+  await srv.removerEvidencia(id, motivo, autor);
   await recarrega();
+}
+
+/* Botao de remover e o pedido de nome e motivo, aberto ali mesmo no item
+   da lista. Vale para a secretaria (janela de atualizacao) e para o gestor
+   (ficha da acao). Nao redesenha a janela ao abrir, para nao perder o que
+   ja foi digitado nela.                                                  */
+const btnRemoverEv = id =>
+  '<button type="button" class="ev-remover" data-tirarev="' + esc(id) + '" title="Remover evidência">' +
+    svg('lixeira') + '</button>';
+
+const formRemocaoEv = () =>
+  '<div class="ev-rem">' +
+    '<p class="mo-aviso">' + svg('alerta') + '<span>A evidência e os anexos saem do sistema. A remoção fica ' +
+      'registrada no histórico da ação, com o nome, o e-mail do login e o motivo.</span></p>' +
+    '<label class="campo cresce"><span>Nome <em class="obrig">(obrigatório)</em></span>' +
+      '<input type="text" name="r_autor" autocomplete="name" placeholder="Seu nome completo"></label>' +
+    '<label class="campo cresce"><span>Motivo da remoção <em class="obrig">(obrigatório)</em></span>' +
+      '<textarea name="r_motivo" rows="2" placeholder="Por exemplo: arquivo errado, documento com dados pessoais"></textarea></label>' +
+    '<p class="mo-erro" hidden></p>' +
+    '<div class="ev-rem-botoes">' +
+      '<button type="button" class="btn-neutro" data-remcancela="1">Cancelar</button>' +
+      '<button type="button" class="btn-perigo" data-remconfirma="1">' + svg('lixeira') + 'Remover evidência</button>' +
+    '</div>' +
+  '</div>';
+
+function ligaRemocaoEvidencia(box, depois){
+  box.querySelectorAll('[data-tirarev]').forEach(b =>
+    b.addEventListener('click', () => {
+      const corpo = b.closest('.ev-item').querySelector('.ev-corpo');
+      corpo.insertAdjacentHTML('beforeend', formRemocaoEv());
+      const f = corpo.querySelector('.ev-rem');
+      const erro = f.querySelector('.mo-erro');
+      b.hidden = true;
+      f.querySelector('[name="r_autor"]').focus();
+      f.querySelector('[data-remcancela]').addEventListener('click', () => { f.remove(); b.hidden = false; });
+      const ok = f.querySelector('[data-remconfirma]');
+      ok.addEventListener('click', async () => {
+        const autor  = f.querySelector('[name="r_autor"]').value.trim();
+        const motivo = f.querySelector('[name="r_motivo"]').value.trim();
+        const falta = !autor ? ['Informe o seu nome.', 'r_autor']
+                    : !motivo ? ['Informe o motivo da remoção.', 'r_motivo'] : null;
+        if(falta){
+          erro.textContent = falta[0]; erro.hidden = false;
+          f.querySelector('[name="' + falta[1] + '"]').focus();
+          return;
+        }
+        if(await gravando(ok, () => removeEvidencia(b.dataset.tirarev, motivo, autor))) depois();
+      });
+    }));
 }
 const evidenciasDe = e => (e && e.evidencias) || [];
 
@@ -506,7 +556,8 @@ function mostraValor(campo, v){
    (situacao, progresso, justificativa e evidencia com anexos) vai ao
    servidor, que guarda no historico a data, a hora, o e-mail do login, o
    que mudou e a propria janela como foi salva. Na coordenacao (state.alvo)
-   e a edicao estrutural da ficha e do prazo, que nao entra no historico.  */
+   e a edicao estrutural da ficha e do prazo, que o servidor tambem registra
+   no historico, como edicao pela coordenacao.                           */
 async function salvaEdicaoAcao(codigo, a, valores, autor, evidencia, arquivos){
   const org = orgAlvo(), pil = pilDe(org, pilAlvo());
   if(state.alvo){
@@ -603,8 +654,9 @@ function caixaJustificativa(a, e, compacto){
   '</div>';
 }
 
-/* Evidencias em leitura. O registro e a remocao ficam na janela de edicao. */
-function listaEvidencias(evs){
+/* Evidencias em leitura. O registro fica na janela de edicao da secretaria;
+   com remover, cada item traz o botao de remocao (ficha do gestor).      */
+function listaEvidencias(evs, remover){
   if(!evs.length) return '<p class="ev-vazio">Nenhuma evidência registrada nesta ação.</p>';
   return '<ul class="ev-lista">' + evs.map(ev =>
     '<li class="ev-item"><span class="ic">' + svg('clipe') + '</span>' +
@@ -614,6 +666,7 @@ function listaEvidencias(evs){
           ? '<div class="ev-anexos">' + ev.anexos.map(chipAnexo).join('') + '</div>'
           : '') +
       '</div>' +
+      (remover ? btnRemoverEv(ev.id) : '') +
     '</li>').join('') + '</ul>';
 }
 
@@ -824,6 +877,12 @@ function montaShell(){
     b.addEventListener('click', () => { state.sf.estudo = null; state.sf.arq = false; navega(b.dataset.rota); }));
 }
 
+/* A coordenacao le todos os estudos, ja com o resumo de cada um. */
+async function atualizaConsolidado(){
+  state.consol = await API.consolidado(state.perfil);
+  state.consol.estudos.concat(state.consol.arquivados || []).forEach(s => { s.res = resumoEstudo(s); });
+}
+
 async function navega(rota, jaCarregado){
   cacheNum = {};
   if(!menuAtual().some(m => m.id === rota)) rota = 'inicio';
@@ -844,11 +903,7 @@ async function navega(rota, jaCarregado){
   }
   if(!state.perfil) return;
   [state.resumo, state.pendencias] = await Promise.all([API.resumo(state.perfil), API.pendencias(state.perfil)]);
-  /* A coordenacao le todos os estudos. */
-  if(ehCoordenacao()){
-    state.consol = await API.consolidado(state.perfil);
-    state.consol.estudos.concat(state.consol.arquivados || []).forEach(s => { s.res = resumoEstudo(s); });
-  }
+  if(ehCoordenacao()) await atualizaConsolidado();
   montaShell();
   $('#sb-nav').querySelectorAll('[data-rota]').forEach(b =>
     b.classList.toggle('active', b.dataset.rota === rota));
@@ -1479,6 +1534,10 @@ function desenhaModal(){
     box.querySelectorAll('[data-fechar]').forEach(b =>
       b.addEventListener('click', () => { fechaModal(); redesenha(); }));
     ligaHistSel(box);
+    ligaRemocaoEvidencia(box, async () => {
+      try{ await atualizaConsolidado(); }catch(e){ mostraErro(e); }
+      desenhaModal();
+    });
     return;
   }
   const a = m.codigo ? acaoPorCodigo(m.codigo) : null;
@@ -1544,8 +1603,7 @@ function blocoEvidencias(a, e){
               ? '<div class="ev-anexos">' + ev.anexos.map(chipAnexo).join('') + '</div>'
               : '') +
           '</div>' +
-          '<button type="button" class="ev-remover" data-tirarev="' + ev.id +
-            '" title="Remover registro">' + svg('lixeira') + '</button>' +
+          btnRemoverEv(ev.id) +
         '</li>').join('') + '</ul>'
     : '<p class="ev-vazio">Nenhuma evidência registrada nesta ação.</p>';
 
@@ -1580,8 +1638,8 @@ function janelaEdicao(a, e){
       '<button class="mo-fechar" data-fechar="1" aria-label="Fechar">' + svg('fechar') + '</button>' +
     '</header>';
 
-  /* Coordenacao: edicao estrutural. A ficha e o prazo pactuado mudam sem
-     entrar no historico; o acompanhamento e as evidencias sao da secretaria. */
+  /* Coordenacao: edicao estrutural. A ficha e o prazo pactuado mudam e o
+     que mudou entra no historico; o acompanhamento e da secretaria.        */
   if(state.alvo)
     return '<div class="mo-caixa" role="dialog" aria-modal="true" aria-label="Edição estrutural da ação">' +
       topo('Edição estrutural da ação') +
@@ -1590,9 +1648,9 @@ function janelaEdicao(a, e){
         grupo('Responsabilidade', [['responsavel', 'area', 'pessoa']]) +
         grupo('Escopo e entrega', [['produto'], ['resultado']]) +
         grupo('Prazo', [['prazo']]) +
-        '<section class="mo-grupo"><p class="mo-aviso">' + svg('info') + '<span>Edição estrutural: a ficha é ' +
-          'gravada sem entrar no histórico de atualizações da ação. Situação, progresso, justificativa e ' +
-          'evidências são atualizados pela secretaria.</span></p></section>' +
+        '<section class="mo-grupo"><p class="mo-aviso">' + svg('info') + '<span>Edição estrutural: o que for ' +
+          'alterado fica registrado no histórico da ação, com a data, a hora e o e-mail do login. Situação, ' +
+          'progresso, justificativa e evidências são atualizados pela secretaria.</span></p></section>' +
       '</form>' +
       '<footer class="mo-rodape">' +
         '<button class="btn-neutro" data-fechar="1">Cancelar</button>' +
@@ -1639,29 +1697,51 @@ function janelaEdicao(a, e){
 
 /* Um registro do historico: quando, por quem, o que mudou e a janela
    inteira como foi salva naquele momento.                              */
+const TIPOS_HIST = {
+  edicao:      { rotulo:'Atualização',                selo:'b-edicao' },
+  rapida:      { rotulo:'Alteração direta no cartão', selo:'b-rapida' },
+  coordenacao: { rotulo:'Edição pela coordenação',    selo:'b-ciclo'  },
+  remocao:     { rotulo:'Remoção de evidência',       selo:'b-atraso' }
+};
+
+/* Remocao de evidencia: o motivo e o que saiu (texto, data e anexos). */
+function corpoRemocao(h){
+  const c = h.campos || {}, ev = c.evidencia || {}, anexos = ev.anexos || [];
+  return '<dl class="hi-rem">' +
+    '<div><dt>Motivo</dt><dd>' + ouDefinir(esc(c.motivo)) + '</dd></div>' +
+    '<div><dt>Evidência removida</dt><dd>' + (ev.data ? dataBR(ev.data) + ' · ' : '') +
+      ouDefinir(esc(ev.texto)) + '</dd></div>' +
+    (anexos.length
+      ? '<div><dt>' + (anexos.length === 1 ? 'Anexo removido' : 'Anexos removidos') + '</dt><dd>' +
+          anexos.map(x => esc(x.nome)).join(', ') + '</dd></div>'
+      : '') +
+  '</dl>';
+}
+
 function cartaoHistorico(h, n, codigo){
-  const mud = (h.mudancas || []).length
+  const remocao = h.tipo === 'remocao';
+  const mud = remocao ? corpoRemocao(h)
+    : (h.mudancas || []).length
     ? '<ul class="hi-mud">' + h.mudancas.map(m =>
         '<li><b>' + m.rotulo + '</b>' +
           '<span class="de">' + mostraValor(m.campo, m.de) + '</span>' + svg('seta') +
           '<span class="para">' + mostraValor(m.campo, m.para) + '</span></li>').join('') + '</ul>'
     : '<p class="hi-sem">Janela salva sem alteração de campo.</p>';
 
-  const janela = h.campos
+  const janela = h.campos && !remocao
     ? '<details class="hi-snap"><summary>Ver a janela como foi salva</summary><dl>' +
         CAMPOS_ACAO.map(c => '<div><dt>' + c.rotulo + '</dt><dd>' +
           mostraValor(c.id, h.campos[c.id]) + '</dd></div>').join('') +
       '</dl></details>'
     : '';
 
+  const tipo = TIPOS_HIST[h.tipo] || TIPOS_HIST.edicao;
   return '<article class="hi-item">' +
     '<div class="hi-topo">' +
       (n ? '<span class="hi-n">#' + n + '</span>' : '') +
       (codigo ? '<span class="hi-acao">' + codigo + '</span>' : '') +
       '<span class="hi-quando">' + dataHoraBR(h.em) + '</span>' +
-      '<span class="badge ' + (h.tipo === 'rapida' ? 'b-rapida' : 'b-edicao') + '">' +
-        (h.tipo === 'coordenacao' ? 'Edição pela coordenação'
-          : h.tipo === 'edicao' ? 'Atualização' : 'Alteração direta no cartão') + '</span>' +
+      '<span class="badge ' + tipo.selo + '">' + tipo.rotulo + '</span>' +
       '<span class="hi-autor">por ' + ouDefinir(esc(h.autor)) + (h.email ? ' · ' + esc(h.email) : '') + '</span>' +
     '</div>' + mud + janela +
   '</article>';
@@ -1771,10 +1851,7 @@ function ligaModal(a){
   box.querySelectorAll('[data-editar-daqui]').forEach(b =>
     b.addEventListener('click', () => abreModal('edicao', b.dataset.editarDaqui)));
   ligaHistSel(box);
-  box.querySelectorAll('[data-tirarev]').forEach(b =>
-    b.addEventListener('click', async () => {
-      if(await gravando(b, () => removeEvidencia(a.codigo, b.dataset.tirarev))) desenhaModal();
-    }));
+  ligaRemocaoEvidencia(box, desenhaModal);
 
   const nova = box.querySelector('#form-nova');
   if(nova){
@@ -2934,9 +3011,13 @@ function resumoEstudo(s){
   Object.keys(STATUS_ACAO).forEach(k => { porSit[k] = itens.filter(x => st(x) === k).length; });
   const futuras = abertas.filter(x => prazoDe(x) && !atrasada(x))
                          .sort((p, q) => prazoDe(p).localeCompare(prazoDe(q)));
+  /* Ultima atualizacao e a do acompanhamento pela secretaria: edicao da
+     coordenacao e remocao de evidencia entram no historico, mas nao contam
+     como sinal de que o estudo esta sendo acompanhado.                  */
+  const acomp = hist.filter(o => o.h.tipo === 'edicao' || o.h.tipo === 'rapida');
   const r = {
     itens:itens, abertas:abertas, hist:hist, porSit:porSit,
-    ultima:    hist.length ? hist[0].h.em : null,
+    ultima:    acomp.length ? acomp[0].h.em : null,
     atrasadas: itens.filter(atrasada),
     comPrazo:  itens.filter(x => prazoDe(x)),
     semPrazo:  itens.filter(x => !prazoDe(x)),
@@ -3097,7 +3178,9 @@ function resumoMudancas(h){
   if(!ms.length) return 'Janela salva sem alteração de campo';
   const partes = ms.map(m => CAMPOS_CURTOS.indexOf(m.campo) >= 0
     ? m.rotulo + ': ' + mostraValor(m.campo, m.para)
-    : (m.campo === 'evidencia' ? 'Evidência anexada' : m.rotulo + ' (texto atualizado)'));
+    : m.campo === 'evidencia' ? 'Evidência anexada'
+    : m.campo === 'evidencia_removida' ? 'Evidência removida'
+    : m.rotulo + ' (texto atualizado)');
   return partes.slice(0, 3).join('; ') + (partes.length > 3 ? '; e mais ' + (partes.length - 3) : '');
 }
 
@@ -3593,13 +3676,14 @@ function janelaSefaFicha(chave){
       secaoAcao('Acompanhamento',
         fichaCampos([['Situação', st.rotulo], ['Prazo pactuado', dataBR(prazoDe(l.x))]], 2) +
         barraProgresso(a, e) + caixaJustificativa(a, e)) +
-      secaoAcao('Evidências', listaEvidencias(evs), evs.length) +
+      secaoAcao('Evidências', listaEvidencias(evs, true), evs.length) +
       secaoAcao('Histórico de atualizações', hs.length
         ? hs.slice().reverse().map((h, n) => cartaoHistorico(h, hs.length - n)).join('')
         : '<p class="hi-sem">Nenhuma atualização registrada nesta ação até agora.</p>', hs.length) +
     '</div>' +
     '<footer class="mo-rodape">' +
-      '<span class="sf-so-leitura">' + svg('info') + 'Consulta. A ficha se edita em Configurações, na aba Ações; o acompanhamento é atualizado pela secretaria.</span>' +
+      '<span class="sf-so-leitura">' + svg('info') + 'Consulta. A ficha se edita em Configurações, na aba Ações; ' +
+        'o acompanhamento é atualizado pela secretaria. Evidência indevida pode ser removida, com registro no histórico.</span>' +
       '<button class="btn-primario" data-fechar="1">Fechar</button>' +
     '</footer>' +
   '</div>';

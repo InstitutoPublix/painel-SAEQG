@@ -32,6 +32,7 @@ Postgres
 | `src/api.js` | Acesso ao Supabase: login, leitura, RPCs, upload e download de anexos |
 | `supabase/migrations/20261110120000_schema.sql` | Tabelas, RLS, funções RPC, bucket e políticas do Storage |
 | `supabase/migrations/20261110120100_conteudo_inicial.sql` | Conteúdo dos relatórios finais: 9 órgãos, 8 estudos, 29 recomendações, 88 ações (gerado) |
+| `supabase/migrations/20261111120000_rastreio_correcoes.sql` | Remoção de evidência com motivo e edição estrutural do gestor passam a entrar no histórico |
 | `supabase/functions/usuarios/index.ts` | Edge Function do cadastro de usuários e do primeiro gestor |
 | `supabase/tests/regras_de_acesso.sql` | Testes das regras de acesso (rodam em transação e desfazem tudo) |
 | `scripts/gera-conteudo-inicial.cjs` | Gera a migration de conteúdo a partir do HTML original |
@@ -39,7 +40,7 @@ Postgres
 ## Publicar no Lovable (Lovable Cloud)
 
 1. Suba este repositório no GitHub e conecte-o a um projeto do Lovable com o **Lovable Cloud** ativado. O Cloud cria o banco e preenche `VITE_SUPABASE_URL` e `VITE_SUPABASE_PUBLISHABLE_KEY`.
-2. Aplique as duas migrations de `supabase/migrations/`, **na ordem do nome do arquivo**: primeiro o schema, depois o conteúdo. Pode pedir ao agente do Lovable ou colar no editor SQL do Cloud.
+2. Aplique as migrations de `supabase/migrations/`, **na ordem do nome do arquivo**: o schema, o conteúdo e depois as seguintes. Pode pedir ao agente do Lovable ou colar no editor SQL do Cloud. Num projeto já publicado, aplique só as que ainda não rodaram.
 3. Publique a Edge Function `usuarios` (`supabase/functions/usuarios`). Ela precisa de `verify_jwt = false`, como está em `supabase/config.toml`, porque confere o token por conta própria.
 4. Nos *secrets* das Edge Functions, crie `SAEQG_BOOTSTRAP_TOKEN` com um valor longo e aleatório. `SUPABASE_URL` e `SUPABASE_SERVICE_ROLE_KEY` já vêm do ambiente.
 5. Em Auth, **desative o cadastro aberto** (*allow new users to sign up*). As contas são criadas só pela coordenação.
@@ -80,7 +81,7 @@ Crie o gestor com o `curl` acima, usando `http://127.0.0.1:54321` e o token `loc
 psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -f supabase/tests/regras_de_acesso.sql
 ```
 
-São 47 verificações sobre o que anônimo, gestor e restrito podem ler e gravar, o histórico, os anexos, a numeração das ações, a recorrência, o arquivamento e a exclusão. Tudo roda numa transação desfeita no fim. Rode com a carga inicial intacta, logo depois de `supabase db reset`.
+São 54 verificações sobre o que anônimo, gestor e restrito podem ler e gravar, o histórico (inclusive remoção de evidência e edição estrutural), os anexos, a numeração das ações, a recorrência, o arquivamento e a exclusão. Tudo roda numa transação desfeita no fim. Rode com a carga inicial intacta, logo depois de `supabase db reset`.
 
 ## Regras de acesso
 
@@ -90,7 +91,9 @@ São 47 verificações sobre o que anônimo, gestor e restrito podem ler e grava
 | Entra por | — | secretarias liberadas no cadastro | só pela SEFA |
 | Vê | — | estudos liberados, no ar e não apagados (arquivado: só consulta) | tudo, inclusive Apagados |
 | Atualiza situação, progresso, justificativa e evidências | — | sim, em estudo no ar e não arquivado | não (a tela não oferece) |
-| Ficha e prazo pactuado das ações, cria ações | — | não | sim (edição estrutural, fora do histórico) |
+| Remove evidência (nome e motivo obrigatórios, registrado no histórico) | — | sim, em estudo no ar e não arquivado | sim, em qualquer estudo |
+| Ficha e prazo pactuado das ações, cria ações | — | não | sim (edição estrutural, registrada no histórico) |
+| Edita ou apaga o histórico | — | não | não (só sai junto com a ação, na exclusão definitiva) |
 | Secretarias, estudos, recomendações, arquivar e apagar | — | não | sim |
 | Usuários | — | não | sim (Edge Function) |
 
@@ -112,9 +115,9 @@ São 47 verificações sobre o que anônimo, gestor e restrito podem ler e grava
 | `marcar_item(p_chave, p_campos)` | gestor | `apagado`, `arquivado` e, no estudo, `oculto`. Chave: `org\|o`, `pil\|o\|e`, `rec\|o\|e\|rid`, `aca\|o\|e\|cod` |
 | `apagar_definitivo(p_chave)` | gestor | Exclui de vez um item que está em Apagados e devolve os anexos a remover do Storage |
 | `criar_acao(p_org, p_estudo, p_rid, p_dados, p_prazo, p_recorrente)` | gestor | Cria a ação (ou uma por exercício até 2030) e devolve os códigos |
-| `editar_acao(p_org, p_estudo, p_codigo, p_campos)` | gestor | Edição estrutural: ficha e prazo, sem histórico |
+| `editar_acao(p_org, p_estudo, p_codigo, p_campos)` | gestor | Edição estrutural: ficha e prazo. O que mudou entra no histórico (tipo `coordenacao`) |
 | `atualizar_acompanhamento(p_org, p_estudo, p_codigo, p_status, p_progresso, p_justificativa, p_autor, p_evidencia)` | restrito | Grava o acompanhamento e a evidência, e registra no histórico com data e hora do servidor e o e-mail do login |
-| `remover_evidencia(p_id)` | restrito | Remove a evidência e devolve os anexos a remover do Storage |
+| `remover_evidencia(p_id, p_motivo, p_autor)` | restrito, gestor | Remove a evidência, registra no histórico (tipo `remocao`) o motivo, o texto e os anexos removidos, e devolve os anexos a remover do Storage |
 
 ### Edge Function `usuarios` (`POST /functions/v1/usuarios`)
 

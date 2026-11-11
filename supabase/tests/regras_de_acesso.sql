@@ -94,8 +94,36 @@ exception when invalid_parameter_value then raise notice 'ok  anexo precisa exis
 end $$;
 select pg_temp.ok(public.atualizar_acompanhamento('seab', 'p1', '1.1', 'em_execucao', 40, 'Em campo', 'Fulano', null) = 0,
   'salvar sem mudança registra 0 mudanças');
-select pg_temp.ok(array_length(public.remover_evidencia((select id from public.evidencias limit 1)), 1) = 1,
+do $$ begin
+  perform public.remover_evidencia((select id from public.evidencias limit 1), '  ', 'Fulano');
+  raise exception 'FALHOU: removeu evidência sem motivo';
+exception when invalid_parameter_value then raise notice 'ok  remover evidência exige motivo';
+end $$;
+do $$ begin
+  perform public.remover_evidencia((select id from public.evidencias limit 1), 'Arquivo errado', '');
+  raise exception 'FALHOU: removeu evidência sem nome';
+exception when invalid_parameter_value then raise notice 'ok  remover evidência exige nome';
+end $$;
+select pg_temp.ok(array_length(public.remover_evidencia((select id from public.evidencias limit 1), 'Arquivo errado', 'Fulano'), 1) = 1,
   'remover evidência devolve o caminho do anexo');
+select pg_temp.ok((select autor = 'Fulano' and email = 'teste.restrito@saeqg.invalid'
+                          and campos ->> 'motivo' = 'Arquivo errado'
+                          and campos -> 'evidencia' ->> 'texto' = 'Relatório parcial'
+                          and campos -> 'evidencia' -> 'anexos' -> 0 ->> 'nome' = 'relatório.pdf'
+                     from public.historico where org_id='seab' and codigo='1.1' and tipo = 'remocao'),
+  'remoção registrada no histórico com motivo, texto e anexos');
+-- evidências fora do alcance do restrito (gravadas direto, como superusuário)
+reset role;
+insert into public.evidencias (id, org_id, estudo_id, codigo, texto) values
+  ('00000000-0000-0000-0000-0000000000e1', 'sesa', 'p1', '1.1', 'Evidência da SESA'),
+  ('00000000-0000-0000-0000-0000000000e2', 'seab', 'p1', '1.1', 'Evidência indevida');
+select pg_temp.como('00000000-0000-0000-0000-00000000000b');
+set local role authenticated;
+do $$ begin
+  perform public.remover_evidencia('00000000-0000-0000-0000-0000000000e1', 'x', 'Fulano');
+  raise exception 'FALHOU: restrito removeu evidência de outro órgão';
+exception when insufficient_privilege then raise notice 'ok  restrito: não remove evidência de outro órgão';
+end $$;
 
 -- ------------------------------------------------------------ usuário autenticado sem cadastro
 reset role;
@@ -111,7 +139,15 @@ set local role authenticated;
 select pg_temp.ok((public.verificar_acesso('sefa') ->> 'ok')::boolean, 'gestor: entra na SEFA');
 select pg_temp.ok(public.verificar_acesso('seab') ->> 'erro' = 'Usuário gestor entra pela coordenação (SEFA).', 'gestor: não entra por secretaria');
 select pg_temp.ok((select count(*) from public.acoes) = 88, 'gestor: vê todas as ações');
-select pg_temp.ok((select count(*) from public.historico) = 2, 'gestor: vê o histórico da SEAB');
+select pg_temp.ok((select count(*) from public.historico) = 3, 'gestor: vê o histórico da SEAB');
+select pg_temp.ok(public.remover_evidencia('00000000-0000-0000-0000-0000000000e2', 'Documento com dados pessoais', 'Gestora') = '{}',
+  'gestor: remove evidência de secretaria');
+select pg_temp.ok((select count(*) from public.historico
+                    where tipo = 'remocao' and email = 'teste.gestor@saeqg.invalid'
+                      and campos ->> 'motivo' = 'Documento com dados pessoais') = 1,
+  'gestor: remoção registrada no histórico');
+select pg_temp.ok(public.remover_evidencia('00000000-0000-0000-0000-0000000000e2', 'x', 'y') = '{}',
+  'remover evidência já removida não faz nada');
 
 -- cadastro
 create temp table t (k text, v text);
@@ -137,7 +173,15 @@ select pg_temp.ok((select count(*) from public.acoes where org_id='seab' and rid
 select public.editar_acao('seab', 'p1', '1.2', '{"titulo":"Título revisto","prazo":"2027-01-15"}');
 select pg_temp.ok((select titulo = 'Título revisto' and prazo = '2027-01-15' and descricao <> '' from public.acoes where org_id='seab' and codigo='1.2'),
   'edição estrutural muda só os campos enviados');
-select pg_temp.ok((select count(*) from public.historico where codigo = '1.2') = 0, 'edição estrutural não entra no histórico');
+select pg_temp.ok((select tipo = 'coordenacao' and email = 'teste.gestor@saeqg.invalid'
+                          and jsonb_array_length(mudancas) = 2
+                          and mudancas @> '[{"campo":"titulo","para":"Título revisto"},{"campo":"prazo","para":"2027-01-15"}]'
+                          and campos ->> 'prazo' = '2027-01-15'
+                     from public.historico where org_id='seab' and codigo = '1.2'),
+  'edição estrutural entra no histórico com o que mudou');
+select public.editar_acao('seab', 'p1', '1.2', '{"titulo":"Título revisto"}');
+select pg_temp.ok((select count(*) from public.historico where org_id='seab' and codigo = '1.2') = 1,
+  'edição estrutural sem mudança não entra no histórico');
 
 -- ciclo de vida
 select public.marcar_item('aca|seab|p1|1.3', '{"arquivado":true}');

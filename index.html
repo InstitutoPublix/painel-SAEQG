@@ -494,6 +494,16 @@ a{color:inherit;text-decoration:none}
   color:hsl(var(--muted-foreground))}
 .ev-remover:hover{background:hsl(var(--destructive)/.1);color:hsl(var(--destructive))}
 .ev-remover .icon{width:15px;height:15px}
+.ev-rem{display:flex;flex-direction:column;gap:12px;margin-top:12px;padding:12px 14px;border-radius:9px;
+  border:1px solid hsl(var(--destructive)/.35);background:hsl(var(--destructive)/.05)}
+.ev-rem .mo-aviso,.ev-rem .mo-erro{margin:0}
+.ev-rem .mo-aviso .icon{color:hsl(var(--destructive))}
+.ev-rem input,.ev-rem textarea{width:100%;min-width:0}
+.ev-rem-botoes{display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap}
+.hi-rem{display:grid;gap:9px;margin:0}
+.hi-rem dt{font-size:max(12px,calc(10px * var(--fs)));font-weight:700;letter-spacing:.1em;text-transform:uppercase;
+  color:hsl(var(--muted-foreground))}
+.hi-rem dd{margin:2px 0 0;font-size:max(12px,calc(13px * var(--fs)));line-height:1.5;overflow-wrap:anywhere}
 .ev-vazio{font-size:max(12px,calc(13px * var(--fs)));color:hsl(var(--muted-foreground));margin:14px 0 0;padding-top:14px;
   border-top:1px solid hsl(var(--border))}
 

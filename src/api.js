@@ -162,8 +162,9 @@ export async function atualizarAcompanhamento(org, pil, codigo, valores, autor, 
   }
 }
 
-export async function removerEvidencia(id) {
-  const caminhos = await rpc('remover_evidencia', { p_id: id });
+/* Secretaria ou gestor. Nome e motivo vão para o histórico da ação. */
+export async function removerEvidencia(id, motivo, autor) {
+  const caminhos = await rpc('remover_evidencia', { p_id: id, p_motivo: motivo, p_autor: autor });
   await removeArquivos(caminhos);
 }
 
