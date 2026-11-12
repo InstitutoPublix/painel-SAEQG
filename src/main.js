@@ -219,7 +219,8 @@ let cacheNum = {};
 /* ---- cadastros de acesso -----------------------------------------------
    Usuarios cadastrados pela coordenacao em Configuracoes > Cadastros. A
    conta (e-mail e senha) fica no Supabase Auth e o nivel no banco:
-   'gestor' entra pela coordenacao (SEFA) e ve tudo; 'restrito' entra so
+   'gestor' entra pela coordenacao (SEFA) ou por qualquer secretaria, e
+   alterna entre elas pela barra lateral; 'restrito' entra so
    nas secretarias e nos estudos de acessos, no formato { orgao: [ids] }.
    Criar, alterar e excluir passa pela Edge Function "usuarios".        */
 const leUsuarios    = () => DB.usuarios;
@@ -822,7 +823,7 @@ function ligaCredenciais(p){
   $('#in-usuario').focus();
 }
 
-async function entrar(id){
+async function entrar(id, rota){
   await recarrega();
   const p = orgaoPorId(id);
   if(!p || p.apagado) return;
@@ -838,7 +839,26 @@ async function entrar(id){
   $('#screen-login').hidden = true;
   $('#screen-app').hidden = false;
   montaShell();
-  navega(location.hash.replace('#', '') || 'inicio', true);
+  navega(rota || location.hash.replace('#', '') || 'inicio', true);
+}
+
+/* O gestor alterna entre a coordenacao e as secretarias sem sair: o
+   servidor confere o acesso ao orgao e a tela abre no Inicio dele.      */
+const ehGestor = () => !!(state.usuario && state.usuario.nivel === 'gestor');
+async function trocaOrgao(id){
+  if(!state.perfil || id === state.perfil.id) return;
+  fechaModal();
+  try{
+    const r = await srv.verificarAcesso(id);
+    if(!r || !r.ok) throw new Error((r && r.erro) || 'Não foi possível abrir este órgão.');
+    state.usuario = r.usuario || state.usuario;
+    state.sf.estudo = null; state.sf.arq = false;
+    await entrar(id, 'inicio');
+  }catch(e){
+    if(!(await sessaoValida())) return;
+    mostraErro(e);
+    montaShell();
+  }
 }
 
 async function sair(){
@@ -868,6 +888,14 @@ function montaShell(){
   $('#u-org').title            = email ? email + ' · ' + p.orgao : p.orgao;
   $('#pill-org').textContent   = p.orgao + ' (' + p.sigla + ')';
   $('#tb-eyebrow').textContent = PAPEL[p.tipo].eyebrow;
+
+  /* Seletor de orgao, so para o gestor. */
+  $('#sb-troca').hidden = !ehGestor();
+  if(ehGestor())
+    $('#sel-orgao').innerHTML = orgaos().map(o =>
+      '<option value="' + o.id + '"' + (o.id === p.id ? ' selected' : '') + '>' +
+      esc(o.sigla) + (o.tipo === 'sefa' ? ' · Coordenação' : ' · ' + esc(o.nome)) +
+      (foraDoAr(o.id) ? ' (em construção)' : '') + '</option>').join('');
 
   $('#sb-nav').innerHTML = menuAtual().map(m =>
     '<button class="sb-item" data-rota="' + m.id + '">' + svg(m.icone) +
@@ -2542,7 +2570,7 @@ function janelaCfgRec(chave){
    estudos marcados. Secretaria com um estudo so libera esse estudo ao ser
    marcada; com mais de um, os estudos sao escolhidos um a um.             */
 const NIVEIS = { gestor:  { rotulo:'Gestor',   selo:'b-ciclo',
-                            como:'Usuário da SEFA: entra pela coordenação e acompanha todos os estudos' },
+                            como:'Usuário da SEFA: entra pela coordenação e por todas as secretarias, alternando entre elas' },
                  restrito:{ rotulo:'Restrito', selo:'b-nao_iniciada',
                             como:'Usuário da secretaria: entra só nas secretarias e nos estudos marcados abaixo' } };
 const orgaosComEstudo = () => orgaos().filter(o => o.tipo !== 'sefa')
@@ -2550,7 +2578,7 @@ const orgaosComEstudo = () => orgaos().filter(o => o.tipo !== 'sefa')
 const ehEu = u => !!(state.usuario && u && state.usuario.email === u.email);
 
 function descreveAcessos(u){
-  if(u.nivel === 'gestor') return 'Coordenação (SEFA) · todos os estudos';
+  if(u.nivel === 'gestor') return 'Coordenação (SEFA) e todas as secretarias';
   return Object.keys(u.acessos || {}).map(org => {
     const o = orgaoPorId(org);
     const nomes = estudosPermitidos(u, org).map(id => esc((pilotoPorId(org, id) || {}).nome || ''));
@@ -3753,6 +3781,7 @@ function ligaResultado(raiz){
    6. INICIALIZACAO
    ============================================================ */
 $('#btn-logout').addEventListener('click', sair);
+$('#sel-orgao').addEventListener('change', ev => trocaOrgao(ev.target.value));
 $('#btn-burger').addEventListener('click', () => document.body.classList.toggle('nav-open'));
 $('#scrim').addEventListener('click', () => document.body.classList.remove('nav-open'));
 document.querySelectorAll('.tb-texto [data-texto]').forEach(b =>

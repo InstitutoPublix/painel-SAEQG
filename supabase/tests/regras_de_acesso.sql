@@ -137,7 +137,9 @@ reset role;
 select pg_temp.como('00000000-0000-0000-0000-00000000000a');
 set local role authenticated;
 select pg_temp.ok((public.verificar_acesso('sefa') ->> 'ok')::boolean, 'gestor: entra na SEFA');
-select pg_temp.ok(public.verificar_acesso('seab') ->> 'erro' = 'Usuário gestor entra pela coordenação (SEFA).', 'gestor: não entra por secretaria');
+select pg_temp.ok((public.verificar_acesso('seab') ->> 'ok')::boolean, 'gestor: entra por secretaria');
+select pg_temp.ok((public.verificar_acesso('sesa') ->> 'ok')::boolean, 'gestor: entra por qualquer secretaria');
+select pg_temp.ok(public.pode_atualizar_estudo('seab', 'p1'), 'gestor: atualiza acompanhamento na secretaria');
 select pg_temp.ok((select count(*) from public.acoes) = 88, 'gestor: vê todas as ações');
 select pg_temp.ok((select count(*) from public.historico) = 3, 'gestor: vê o histórico da SEAB');
 select pg_temp.ok(public.remover_evidencia('00000000-0000-0000-0000-0000000000e2', 'Documento com dados pessoais', 'Gestora') = '{}',
