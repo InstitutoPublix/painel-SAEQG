@@ -778,6 +778,17 @@ body.modal-aberto{overflow:hidden}
 .hi-mud .icon{width:13px;height:13px;flex:0 0 auto;color:hsl(var(--muted-foreground))}
 .hi-mud .vazio{font-style:italic;text-decoration:none}
 .hi-sem{margin:0;font-size:max(12px,calc(13px * var(--fs)));font-style:italic;color:hsl(var(--muted-foreground))}
+/* evidência anexada na atualização: texto e anexos para baixar */
+.hi-mud li.hi-ev{flex-direction:column;align-items:stretch;gap:6px}
+.hi-ev-corpo{padding:11px 13px;border-radius:9px;background:hsl(var(--muted))}
+.hi-ev-corpo .ev-texto{margin:3px 0 0;overflow-wrap:anywhere}
+.hi-ev-corpo .ev-anexos{margin-top:8px}
+.hi-ev .anexo .icon{width:12px;height:12px;color:inherit}
+.hi-ev-corpo.is-removida .ev-texto{color:hsl(var(--muted-foreground))}
+.hi-ev-corpo.is-removida .anexo{color:hsl(var(--muted-foreground));background:hsl(var(--card));text-decoration:line-through}
+.hi-ev-nota{display:flex;align-items:flex-start;gap:7px;margin:8px 0 0;
+  font-size:max(12px,calc(12.5px * var(--fs)));line-height:1.5;color:hsl(var(--muted-foreground))}
+.hi-ev-nota .icon{margin-top:3px}
 .hi-snap{margin-top:11px}
 .hi-snap summary{cursor:pointer;font-size:max(12px,calc(12.5px * var(--fs)));font-weight:600;color:hsl(var(--primary))}
 .hi-snap dl{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:13px;

@@ -106,8 +106,11 @@ const PRE = 'saeqgf.';
      recs      { 'org|pil': [recomendacao com acoes] }
      estado    { 'org|pil': { codigo: { status, prazo, progresso, justificativa, evidencias, historico } } }
      marcas    { 'org|pil|codigo': { apagado, apagadoEm, arquivado, arquivadoEm } }
-     usuarios  [{ id, email, nivel, acessos, criadoEm }] (so o gestor recebe a lista) */
-const DB = { publicos:[], orgaos:[], estudos:{}, recs:{}, estado:{}, marcas:{}, usuarios:[] };
+     usuarios  [{ id, email, nivel, acessos, criadoEm }] (so o gestor recebe a lista)
+     evPorId   { id da evidencia: evidencia } (as que existem, para o historico)
+     remocoes  { id da evidencia: registro de remocao do historico }       */
+const DB = { publicos:[], orgaos:[], estudos:{}, recs:{}, estado:{}, marcas:{}, usuarios:[],
+             evPorId:{}, remocoes:{} };
 
 async function carregaPublicos(){
   DB.publicos = (await srv.orgaosPublicos()).map(o => ({
@@ -171,10 +174,16 @@ async function recarrega(){
   });
   b.anexos.forEach(x => { if(evs[x.evidencia_id])
     evs[x.evidencia_id].anexos.push({ nome:x.nome, tamanho:x.tamanho, tipo:x.tipo, caminho:x.caminho }); });
+  /* evidenciaId liga o registro a evidencia que ele anexou (ou removeu):
+     o historico mostra os anexos dela, para baixar, na propria atualizacao. */
+  DB.evPorId = evs; DB.remocoes = {};
   b.historico.forEach(h => {
     const e = estadoDe(h.org_id, h.estudo_id, h.codigo);
-    if(e) e.historico.push({ id:h.id, em:h.em, tipo:h.tipo, autor:h.autor, email:h.email,
-                             campos:h.campos || undefined, mudancas:h.mudancas || [] });
+    if(!e) return;
+    const reg = { id:h.id, em:h.em, tipo:h.tipo, autor:h.autor, email:h.email,
+                  campos:h.campos || undefined, mudancas:h.mudancas || [], evidenciaId:h.evidencia_id };
+    e.historico.push(reg);
+    if(reg.tipo === 'remocao' && reg.evidenciaId) DB.remocoes[reg.evidenciaId] = reg;
   });
 
   const acessos = {};
@@ -702,7 +711,7 @@ const rotTitulo = () => { const p = rotPlural(); return p.charAt(0).toUpperCase(
 const state = { perfil:null, orgaoSel:null, pagina:'inicio', rec:0, vis:'lista', resumo:null, pendencias:null, modal:null,
                 /* quem entrou: { email, nivel } (nivel nulo antes do primeiro cadastro) */
                 usuario:null,
-                piloto:null, cfg:'secretarias', cfgOrg:null, cfgPil:null, cfgRec:null,
+                piloto:null, cfg:'secretarias', cfgOrg:null, cfgPil:null, cfgRec:null, cfgUsuFiltro:'',
                 /* estudo alvo da janela de acao quando quem edita e a coordenacao */
                 alvo:null,
                 /* coordenacao da SEFA: dados consolidados, estudo aberto, visao e
@@ -1746,11 +1755,40 @@ function corpoRemocao(h){
   '</dl>';
 }
 
+/* Evidencia anexada numa atualizacao: a data, o texto e os anexos, que o
+   restrito e o gestor baixam dali mesmo (o clique no anexo e o mesmo do
+   cartao da acao). Se ela foi removida depois, os arquivos ja sairam do
+   sistema: ficam o texto, o nome dos anexos e quando, por quem e por que
+   saiu. Sem a coluna evidencia_id no servidor (migration ainda nao
+   aplicada), mostra so o texto, como antes.                              */
+function evidenciaNoHistorico(h, m){
+  if(h.evidenciaId === undefined)
+    return '<li><b>' + m.rotulo + '</b><span class="para">' + mostraValor(m.campo, m.para) + '</span></li>';
+  const ev  = h.evidenciaId ? DB.evPorId[h.evidenciaId] : null;
+  const rem = !ev && h.evidenciaId ? DB.remocoes[h.evidenciaId] : null;
+  const saiu = rem ? ((rem.campos || {}).evidencia || {}) : {};
+  const data   = ev ? ev.data : saiu.data;
+  const anexos = ev ? ev.anexos : (saiu.anexos || []);
+  const nota = ev ? (anexos.length ? '' : '<p class="hi-ev-nota">Sem arquivo anexado.</p>')
+    : '<p class="hi-ev-nota">' + svg('alerta') + '<span>' + (rem
+        ? 'Removida em ' + dataHoraBR(rem.em) + ' por ' + ouDefinir(esc(rem.autor)) +
+          '. Motivo: ' + ouDefinir(esc((rem.campos || {}).motivo)) + '.'
+        : 'Esta evidência foi removida depois.') +
+      (anexos.length ? ' Os anexos saíram do sistema junto com ela.' : '') + '</span></p>';
+  return '<li class="hi-ev"><b>' + m.rotulo + '</b>' +
+    '<div class="hi-ev-corpo' + (ev ? '' : ' is-removida') + '">' +
+      (data ? '<div class="ev-data">' + dataBR(data) + '</div>' : '') +
+      '<p class="ev-texto">' + ouDefinir(esc(ev ? ev.texto : m.para)) + '</p>' +
+      (anexos.length ? '<div class="ev-anexos">' + anexos.map(chipAnexo).join('') + '</div>' : '') +
+      nota +
+    '</div></li>';
+}
+
 function cartaoHistorico(h, n, codigo){
   const remocao = h.tipo === 'remocao';
   const mud = remocao ? corpoRemocao(h)
     : (h.mudancas || []).length
-    ? '<ul class="hi-mud">' + h.mudancas.map(m =>
+    ? '<ul class="hi-mud">' + h.mudancas.map(m => m.campo === 'evidencia' ? evidenciaNoHistorico(h, m) :
         '<li><b>' + m.rotulo + '</b>' +
           '<span class="de">' + mostraValor(m.campo, m.de) + '</span>' + svg('seta') +
           '<span class="para">' + mostraValor(m.campo, m.para) + '</span></li>').join('') + '</ul>'
@@ -2586,25 +2624,49 @@ function descreveAcessos(u){
   }).filter(Boolean).join(' · ') || A_DEFINIR;
 }
 
+/* Filtro da lista por perfil: todos, gestor ou restrito de uma secretaria
+   ('restrito|<org>'). O restrito liberado em mais de uma secretaria aparece
+   no filtro de cada uma delas.                                            */
+const temAcessoAoOrgao = (u, org) => u.nivel === 'restrito' && ((u.acessos || {})[org] || []).length > 0;
+function filtroPerfil(f){
+  if(f === 'gestor') return u => u.nivel === 'gestor';
+  if(String(f).indexOf('restrito|') === 0){ const org = f.slice(9); return u => temAcessoAoOrgao(u, org); }
+  return () => true;
+}
+
 function cfgCadastros(){
   const us = leUsuarios().slice().sort((a, b) =>
     (a.nivel === b.nivel ? (a.email < b.email ? -1 : 1) : (a.nivel === 'gestor' ? -1 : 1)));
   const g = us.filter(u => u.nivel === 'gestor').length;
-  const lista = us.length
-    ? us.map(u => cfgItem({
+  const secs = orgaos().filter(o => o.tipo !== 'sefa');
+  const opcoes = [['', 'Todos', us.length], ['gestor', 'Gestor', g]].concat(secs.map(o =>
+    ['restrito|' + o.id, 'Restrito - ' + o.sigla, us.filter(u => temAcessoAoOrgao(u, o.id)).length]));
+  if(!opcoes.some(x => x[0] === state.cfgUsuFiltro)) state.cfgUsuFiltro = '';
+  const vistos = us.filter(filtroPerfil(state.cfgUsuFiltro));
+  const filtro = us.length
+    ? '<div class="cfg-escolha"><label class="campo"><span>Tipo de perfil</span><select data-cfgusufiltro="1">' +
+        opcoes.map(x => '<option value="' + esc(x[0]) + '"' + (x[0] === state.cfgUsuFiltro ? ' selected' : '') + '>' +
+          esc(x[1]) + ' (' + x[2] + ')</option>').join('') +
+      '</select></label></div>'
+    : '';
+  const lista = !us.length
+    ? '<div class="pl-nota">' + svg('info') + '<span>Nenhum usuário cadastrado. ' +
+        '<b>Comece pelo usuário gestor da SEFA.</b></span></div>'
+    : vistos.length
+    ? vistos.map(u => cfgItem({
         titulo: u.email,
         selos: '<span class="badge ' + NIVEIS[u.nivel].selo + '">' + NIVEIS[u.nivel].rotulo + '</span>' +
                (ehEu(u) ? '<span class="badge b-nova">Você</span>' : ''),
         meta: descreveAcessos(u),
         botoes: btnCfg('usueditar', u.id, 'lapis', 'Editar') + btnCfg('usuexcluir', u.id, 'lixeira', 'Excluir', 'neutra')
       })).join('')
-    : '<div class="pl-nota">' + svg('info') + '<span>Nenhum usuário cadastrado. ' +
-        '<b>Comece pelo usuário gestor da SEFA.</b></span></div>';
+    : '<p class="ev-vazio">Nenhum usuário com este tipo de perfil.</p>';
   return '<div class="pl-bar"><div class="pl-resumo"><b>' + us.length + '</b> ' +
       (us.length === 1 ? 'usuário cadastrado' : 'usuários cadastrados') +
       (us.length ? ' · ' + contaTexto(g, 'gestor', 'gestores') + ' · ' +
-                   contaTexto(us.length - g, 'restrito', 'restritos') : '') + '</div></div>' +
-    lista +
+                   contaTexto(us.length - g, 'restrito', 'restritos') : '') +
+      (state.cfgUsuFiltro ? ' · mostrando <b>' + vistos.length + '</b>' : '') + '</div></div>' +
+    filtro + lista +
     '<button class="ev-add" data-usunovo="1">' + svg('mais') + 'Adicionar usuário</button>';
 }
 
@@ -2799,6 +2861,8 @@ function ligaConfig(item){
     el.addEventListener('change', () => { state.cfgPil = el.value; state.cfgRec = null; desenhaPagina(item); }));
   $('#page').querySelectorAll('[data-cfgrec]').forEach(el =>
     el.addEventListener('change', () => { state.cfgRec = parseInt(el.value, 10) || null; desenhaPagina(item); }));
+  $('#page').querySelectorAll('[data-cfgusufiltro]').forEach(el =>
+    el.addEventListener('change', () => { state.cfgUsuFiltro = el.value; desenhaPagina(item); }));
   /* Acoes: a janela e a mesma da secretaria, apontada para o estudo
      escolhido (state.alvo). Fechar a janela desfaz o alvo.             */
   const abreAcao = (tipo, chave) => {

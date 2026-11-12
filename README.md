@@ -34,6 +34,7 @@ Postgres
 | `supabase/migrations/20261110120100_conteudo_inicial.sql` | Conteúdo dos relatórios finais: 9 órgãos, 8 estudos, 29 recomendações, 88 ações (gerado) |
 | `supabase/migrations/20261111120000_rastreio_correcoes.sql` | Remoção de evidência com motivo e edição estrutural do gestor passam a entrar no histórico |
 | `supabase/migrations/20261112120000_gestor_nas_secretarias.sql` | Gestor entra também por qualquer secretaria e atualiza o acompanhamento nela |
+| `supabase/migrations/20261113120000_evidencias_no_historico.sql` | Cada registro do histórico aponta a evidência que anexou ou removeu (`evidencia_id`), para os anexos serem baixados pelo histórico |
 | `supabase/functions/usuarios/index.ts` | Edge Function do cadastro de usuários e do primeiro gestor |
 | `supabase/tests/regras_de_acesso.sql` | Testes das regras de acesso (rodam em transação e desfazem tudo) |
 | `scripts/gera-conteudo-inicial.cjs` | Gera a migration de conteúdo a partir do HTML original |
@@ -82,7 +83,7 @@ Crie o gestor com o `curl` acima, usando `http://127.0.0.1:54321` e o token `loc
 psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -f supabase/tests/regras_de_acesso.sql
 ```
 
-São 56 verificações sobre o que anônimo, gestor e restrito podem ler e gravar, o histórico (inclusive remoção de evidência e edição estrutural), os anexos, a numeração das ações, a recorrência, o arquivamento e a exclusão. Tudo roda numa transação desfeita no fim. Rode com a carga inicial intacta, logo depois de `supabase db reset`.
+São 61 verificações sobre o que anônimo, gestor e restrito podem ler e gravar, o histórico (inclusive remoção de evidência, edição estrutural e a evidência ligada a cada atualização), os anexos e o download deles, a numeração das ações, a recorrência, o arquivamento e a exclusão. Tudo roda numa transação desfeita no fim. Rode com a carga inicial intacta, logo depois de `supabase db reset`.
 
 ## Regras de acesso
 
@@ -93,6 +94,7 @@ São 56 verificações sobre o que anônimo, gestor e restrito podem ler e grava
 | Vê | — | estudos liberados, no ar e não apagados (arquivado: só consulta) | tudo, inclusive Apagados |
 | Atualiza situação, progresso, justificativa e evidências | — | sim, em estudo no ar e não arquivado | sim, em estudo no ar e não arquivado (pela tela da secretaria) |
 | Remove evidência (nome e motivo obrigatórios, registrado no histórico) | — | sim, em estudo no ar e não arquivado | sim, em qualquer estudo |
+| Baixa os anexos das evidências, no cartão da ação e no histórico de atualizações | — | sim, nos estudos que vê (inclusive arquivado) | sim, em todos |
 | Ficha e prazo pactuado das ações, cria ações | — | não | sim (edição estrutural, registrada no histórico) |
 | Edita ou apaga o histórico | — | não | não (só sai junto com a ação, na exclusão definitiva) |
 | Secretarias, estudos, recomendações, arquivar e apagar | — | não | sim |
@@ -117,8 +119,8 @@ São 56 verificações sobre o que anônimo, gestor e restrito podem ler e grava
 | `apagar_definitivo(p_chave)` | gestor | Exclui de vez um item que está em Apagados e devolve os anexos a remover do Storage |
 | `criar_acao(p_org, p_estudo, p_rid, p_dados, p_prazo, p_recorrente)` | gestor | Cria a ação (ou uma por exercício até 2030) e devolve os códigos |
 | `editar_acao(p_org, p_estudo, p_codigo, p_campos)` | gestor | Edição estrutural: ficha e prazo. O que mudou entra no histórico (tipo `coordenacao`) |
-| `atualizar_acompanhamento(p_org, p_estudo, p_codigo, p_status, p_progresso, p_justificativa, p_autor, p_evidencia)` | restrito, gestor | Grava o acompanhamento e a evidência, e registra no histórico com data e hora do servidor e o e-mail do login |
-| `remover_evidencia(p_id, p_motivo, p_autor)` | restrito, gestor | Remove a evidência, registra no histórico (tipo `remocao`) o motivo, o texto e os anexos removidos, e devolve os anexos a remover do Storage |
+| `atualizar_acompanhamento(p_org, p_estudo, p_codigo, p_status, p_progresso, p_justificativa, p_autor, p_evidencia)` | restrito, gestor | Grava o acompanhamento e a evidência, e registra no histórico com data e hora do servidor, o e-mail do login e o id da evidência anexada (`evidencia_id`) |
+| `remover_evidencia(p_id, p_motivo, p_autor)` | restrito, gestor | Remove a evidência, registra no histórico (tipo `remocao`) o motivo, o texto, os anexos removidos e o id da evidência, e devolve os anexos a remover do Storage |
 
 ### Edge Function `usuarios` (`POST /functions/v1/usuarios`)
 

@@ -86,6 +86,18 @@ select pg_temp.ok((select status = 'em_execucao' and progresso = 40 from public.
 select pg_temp.ok((select email = 'teste.restrito@saeqg.invalid' and autor = 'Fulano de Tal' and campos->>'progresso' = '40'
                      from public.historico where org_id='seab' and codigo='1.1'), 'histórico com e-mail, autor e janela');
 select pg_temp.ok((select count(*) from public.anexos) = 1, 'anexo registrado');
+select pg_temp.ok((select h.evidencia_id = ev.id
+                     from public.historico h
+                     join public.evidencias ev on ev.org_id = h.org_id and ev.estudo_id = h.estudo_id and ev.codigo = h.codigo
+                    where h.org_id='seab' and h.codigo='1.1' and h.tipo = 'edicao'),
+  'histórico aponta a evidência anexada na atualização');
+select pg_temp.ok((select count(*) from public.anexos an
+                     join public.historico h on h.evidencia_id = an.evidencia_id
+                    where h.org_id='seab' and h.codigo='1.1') = 1,
+  'restrito: lê os anexos da evidência pelo histórico');
+select pg_temp.ok((select count(*) from storage.objects
+                    where bucket_id = 'evidencias' and name = 'seab/p1/1.1/u1/relatorio.pdf') = 1,
+  'restrito: baixa o arquivo do anexo');
 do $$ begin
   perform public.atualizar_acompanhamento('seab', 'p1', '1.1', 'concluida', 100, 'x', 'Fulano',
     '{"texto":"t","anexos":[{"nome":"x","caminho":"seab/p1/1.1/u9/nao-existe.pdf"}]}');
@@ -112,6 +124,12 @@ select pg_temp.ok((select autor = 'Fulano' and email = 'teste.restrito@saeqg.inv
                           and campos -> 'evidencia' -> 'anexos' -> 0 ->> 'nome' = 'relatório.pdf'
                      from public.historico where org_id='seab' and codigo='1.1' and tipo = 'remocao'),
   'remoção registrada no histórico com motivo, texto e anexos');
+select pg_temp.ok((select r.evidencia_id is not null and r.evidencia_id = a.evidencia_id
+                     from public.historico r
+                     join public.historico a on a.org_id = r.org_id and a.estudo_id = r.estudo_id and a.codigo = r.codigo
+                                            and a.tipo = 'edicao' and a.mudancas @> '[{"campo":"evidencia"}]'
+                    where r.org_id='seab' and r.codigo='1.1' and r.tipo = 'remocao'),
+  'remoção aponta a mesma evidência da atualização que a anexou');
 -- evidências fora do alcance do restrito (gravadas direto, como superusuário)
 reset role;
 insert into public.evidencias (id, org_id, estudo_id, codigo, texto) values
@@ -142,6 +160,9 @@ select pg_temp.ok((public.verificar_acesso('sesa') ->> 'ok')::boolean, 'gestor: 
 select pg_temp.ok(public.pode_atualizar_estudo('seab', 'p1'), 'gestor: atualiza acompanhamento na secretaria');
 select pg_temp.ok((select count(*) from public.acoes) = 88, 'gestor: vê todas as ações');
 select pg_temp.ok((select count(*) from public.historico) = 3, 'gestor: vê o histórico da SEAB');
+select pg_temp.ok((select count(*) from storage.objects
+                    where bucket_id = 'evidencias' and name = 'seab/p1/1.1/u1/relatorio.pdf') = 1,
+  'gestor: baixa arquivo de anexo de secretaria');
 select pg_temp.ok(public.remover_evidencia('00000000-0000-0000-0000-0000000000e2', 'Documento com dados pessoais', 'Gestora') = '{}',
   'gestor: remove evidência de secretaria');
 select pg_temp.ok((select count(*) from public.historico
