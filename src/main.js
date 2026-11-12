@@ -1648,15 +1648,61 @@ function blocoEvidencias(a, e){
     '<div class="mo-linha" style="margin-top:14px">' +
       '<label class="campo"><span>Data do registro</span>' +
         '<input type="date" name="f_evdata" value="' + isoHoje() + '"></label>' +
-      '<label class="campo cresce"><span>Anexos</span>' +
-        '<input type="file" name="f_evanexos" multiple></label>' +
+      '<div class="campo cresce"><span>Anexos</span>' +
+        '<ul class="ev-pend" id="ev-pend">' + listaPendentes() + '</ul>' +
+        '<input type="file" id="f-evanexos" multiple hidden>' +
+        '<button type="button" class="ev-add ev-escolher" data-escolher="1">' + svg('mais') +
+          'Escolher arquivos</button></div>' +
     '</div>' +
     '<label class="campo cresce" style="margin-top:14px"><span>Nova evidência</span>' +
       '<textarea name="f_evtexto" rows="2" placeholder="O que foi executado e como isso comprova o ' +
         'produto esperado. O registro é gravado ao salvar a atualização."></textarea></label>' +
-    '<p class="mo-origem">Os anexos são enviados ao salvar a atualização, junto com a evidência ' +
-      '(até 25 MB por arquivo). Clique no nome de um anexo registrado para baixá-lo.</p>' +
+    '<p class="mo-origem">Anexe quantos arquivos quiser: cada escolha entra na lista e o X retira o arquivo. ' +
+      'Eles são enviados ao salvar a atualização, junto com a evidência (até 25 MB por arquivo). ' +
+      'Clique no nome de um anexo registrado para baixá-lo.</p>' +
   '</section>';
+}
+
+/* Arquivos escolhidos para a nova evidencia, ainda nao enviados. Ficam na
+   janela aberta (state.modal.anexos), para nao se perderem quando ela se
+   redesenha: cada escolha acrescenta a lista, o X retira, e tudo sobe ao
+   servidor so ao salvar a atualizacao.                                  */
+const anexosPendentes = () => (state.modal && state.modal.anexos) || [];
+function listaPendentes(){
+  const xs = anexosPendentes();
+  if(!xs.length) return '<li class="ev-pend-vazio">Nenhum arquivo escolhido.</li>';
+  return xs.map((f, i) => '<li class="ev-pend-item">' + svg('arquivo') +
+    '<span class="nome">' + esc(f.name) + '</span><em>' + tamanhoArq(f.size) + '</em>' +
+    '<button type="button" class="ev-pend-tirar" data-tirarpend="' + i + '" title="Retirar ' + esc(f.name) +
+      '" aria-label="Retirar ' + esc(f.name) + '">' + svg('fechar') + '</button></li>').join('');
+}
+function ligaPendentes(form){
+  const entrada = form.querySelector('#f-evanexos');
+  if(!entrada) return;
+  const lista = form.querySelector('#ev-pend');
+  const atualiza = () => {
+    lista.innerHTML = listaPendentes();
+    lista.querySelectorAll('[data-tirarpend]').forEach(b => b.addEventListener('click', () => {
+      state.modal.anexos.splice(parseInt(b.dataset.tirarpend, 10), 1);
+      atualiza();
+    }));
+  };
+  form.querySelector('[data-escolher]').addEventListener('click', () => entrada.click());
+  entrada.addEventListener('change', () => {
+    const xs = state.modal.anexos = state.modal.anexos || [];
+    const grandes = [];
+    Array.from(entrada.files || []).forEach(f => {
+      if(f.size > srv.LIMITE_ANEXO){ grandes.push(f.name); return; }
+      /* O mesmo arquivo escolhido de novo nao entra duas vezes. */
+      if(!xs.some(x => x.name === f.name && x.size === f.size && x.lastModified === f.lastModified)) xs.push(f);
+    });
+    entrada.value = '';
+    atualiza();
+    if(grandes.length) mostraErro(new Error(grandes.length === 1
+      ? 'O arquivo "' + grandes[0] + '" passa do limite de 25 MB e não foi incluído.'
+      : 'Os arquivos "' + grandes.join('", "') + '" passam do limite de 25 MB e não foram incluídos.'));
+  });
+  atualiza();
 }
 
 function janelaEdicao(a, e){
@@ -1937,6 +1983,7 @@ function ligaModal(a){
   /* Enter dentro de um campo nao pode submeter a janela: quem grava e o
      botao Salvar edicao, no rodape.                                      */
   form.addEventListener('submit', ev => ev.preventDefault());
+  ligaPendentes(form);
 
   /* O numero digitado vira percentual na hora, na barra logo abaixo. */
   const pct = form.querySelector('[name="f_progresso"]');
@@ -1965,7 +2012,7 @@ function ligaModal(a){
       /* evidencia e autor so existem na atualizacao da secretaria. Os
          arquivos acompanham a evidencia: sem texto, nao ha onde anexa-los. */
       const texto = form.f_evtexto ? form.f_evtexto.value.trim() : '';
-      const arquivos = form.f_evanexos ? Array.from(form.f_evanexos.files || []) : [];
+      const arquivos = anexosPendentes().slice();
       if(arquivos.length && !texto){
         mostraErro(new Error('Descreva a evidência para anexar os arquivos.'));
         form.f_evtexto.focus();
