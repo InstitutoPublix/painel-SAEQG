@@ -159,7 +159,7 @@ select pg_temp.ok((public.verificar_acesso('seab') ->> 'ok')::boolean, 'gestor: 
 select pg_temp.ok((public.verificar_acesso('sesa') ->> 'ok')::boolean, 'gestor: entra por qualquer secretaria');
 select pg_temp.ok(public.pode_atualizar_estudo('seab', 'p1'), 'gestor: atualiza acompanhamento na secretaria');
 select pg_temp.ok((select count(*) from public.acoes) = 88, 'gestor: vê todas as ações');
-select pg_temp.ok((select count(*) from public.historico) = 3, 'gestor: vê o histórico da SEAB');
+select pg_temp.ok((select count(*) from public.historico where org_id = 'seab') = 3, 'gestor: vê o histórico da SEAB');
 select pg_temp.ok((select count(*) from storage.objects
                     where bucket_id = 'evidencias' and name = 'seab/p1/1.1/u1/relatorio.pdf') = 1,
   'gestor: baixa arquivo de anexo de secretaria');

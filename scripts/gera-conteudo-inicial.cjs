@@ -1,14 +1,15 @@
 #!/usr/bin/env node
 /* Gera a migration com o conteúdo dos relatórios finais (órgãos, estudos,
    recomendações e ações) a partir das constantes PERFIS e CONTEUDO do HTML
-   original. Rodar de novo só se o texto dos relatórios mudar no HTML:
+   original, a versão offline do sistema, que fica fora deste repositório:
 
-     node scripts/gera-conteudo-inicial.cjs \
-       "Sistema de Acompanhamento dos Estudos da Qualidade do Gasto - vFinal.html" \
+     node scripts/gera-conteudo-inicial.cjs "<caminho do HTML offline>" \
        > supabase/migrations/20261110120100_conteudo_inicial.sql
 
-   A carga é idempotente (on conflict do nothing): não sobrescreve nada que a
-   coordenação já tenha editado no sistema. */
+   A carga é idempotente (on conflict do nothing): não sobrescreve nada que já
+   esteja no banco. Texto que mudou depois da carga vai ao sistema pela tela
+   de Configurações ou por uma migration de atualização, como a
+   20261114120000_conteudo_seed_der.sql. */
 const fs = require('fs');
 
 const arquivo = process.argv[2];

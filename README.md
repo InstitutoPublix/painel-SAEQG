@@ -2,7 +2,7 @@
 
 SAEQG · Sistema de Acompanhamento dos Estudos da Qualidade do Gasto (programa Orçamento para Resultados, SEFA/PR).
 
-O front é o mesmo do HTML original (`Sistema de Acompanhamento dos Estudos da Qualidade do Gasto - vFinal.html`), agora ligado a um backend em **Supabase**, que é o backend do **Lovable Cloud**. Nada foi acrescentado além do que as telas já faziam: os dados que viviam no `localStorage` de cada navegador passaram para o servidor, compartilhados e com controle de acesso.
+O front é o mesmo do HTML original (a versão offline `Sistema de Acompanhamento dos Estudos da Qualidade do Gasto - vFinal.html`, mantida fora deste repositório), agora ligado a um backend em **Supabase**, que é o backend do **Lovable Cloud**. Nada foi acrescentado além do que as telas já faziam: os dados que viviam no `localStorage` de cada navegador passaram para o servidor, compartilhados e com controle de acesso.
 
 ## Arquitetura
 
@@ -35,9 +35,10 @@ Postgres
 | `supabase/migrations/20261111120000_rastreio_correcoes.sql` | Remoção de evidência com motivo e edição estrutural do gestor passam a entrar no histórico |
 | `supabase/migrations/20261112120000_gestor_nas_secretarias.sql` | Gestor entra também por qualquer secretaria e atualiza o acompanhamento nela |
 | `supabase/migrations/20261113120000_evidencias_no_historico.sql` | Cada registro do histórico aponta a evidência que anexou ou removeu (`evidencia_id`), para os anexos serem baixados pelo histórico |
+| `supabase/migrations/20261114120000_conteudo_seed_der.sql` | Versão atualizada do relatório: ficha e acompanhamento das 7 ações da SEED, com registro no histórico, e resumo da aba Início e fonte das recomendações do DER |
 | `supabase/functions/usuarios/index.ts` | Edge Function do cadastro de usuários e do primeiro gestor |
 | `supabase/tests/regras_de_acesso.sql` | Testes das regras de acesso (rodam em transação e desfazem tudo) |
-| `scripts/gera-conteudo-inicial.cjs` | Gera a migration de conteúdo a partir do HTML original |
+| `scripts/gera-conteudo-inicial.cjs` | Gera a migration da carga inicial a partir do HTML original (versão offline, fora do repositório) |
 
 ## Publicar no Lovable (Lovable Cloud)
 
@@ -140,14 +141,12 @@ Bucket privado `evidencias`, com até 25 MB por arquivo. Caminho: `<org>/<estudo
 - **Sessão**: fica no `sessionStorage` da aba, como antes. Fechar a aba encerra o acesso.
 - **Anexos**: os arquivos das evidências passam a ser enviados e podem ser baixados clicando no nome. Anexo sem texto de evidência é recusado, para não se perder.
 - **Histórico**: data, hora e e-mail vêm do servidor, e não do navegador.
-- **Conteúdo dos relatórios**: saiu do código e virou carga inicial do banco. Se o texto de um relatório mudar, ajuste o HTML original e gere a migration de novo:
+- **Conteúdo dos relatórios**: saiu do código e virou carga inicial do banco. O HTML original (versão offline) fica fora deste repositório; a carga inicial foi gerada dele com:
 
 ```bash
-node scripts/gera-conteudo-inicial.cjs \
-  "Sistema de Acompanhamento dos Estudos da Qualidade do Gasto - vFinal.html" \
-  > supabase/migrations/<timestamp>_conteudo.sql
+node scripts/gera-conteudo-inicial.cjs "<caminho do HTML offline>" > supabase/migrations/<timestamp>_conteudo.sql
 ```
 
-A carga é idempotente (`on conflict do nothing`): não sobrescreve o que a coordenação já editou. Para mudar um texto já carregado, edite pela tela de Configurações.
+A carga é idempotente (`on conflict do nothing`): não sobrescreve o que já está no banco. Para levar ao sistema um texto que mudou depois, edite pela tela de Configurações ou escreva uma migration de atualização, como a `20261114120000_conteudo_seed_der.sql`.
 
 Dados que estavam no `localStorage` de algum navegador **não são migrados**. A versão final já começava sem lançamentos.
